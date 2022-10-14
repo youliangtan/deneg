@@ -2,17 +2,16 @@
 
 toy problem of decentralized negotiation system
 
-<WORK IN PROGRESS>
+**~WORK IN PROGRESS~**
 
-This is to create a simple decentralized negotiation library
-
+DeNeg is a python library for user to implement decentralized negotiation system on each agent. This library should be implemented on each agent in the system.
 
 Dependencies
  - ros2 (Tested on humble)
 
-
 Compilation
 ```bash
+cd ros2_ws
 colcon build
 ```
 
@@ -36,10 +35,17 @@ class Agent(DeNeg):
         return {self.name: {"cost": cost}}
 
     def round_table(round, other_proposals):
-        # we willl always asusume our 
-        name=  io nvn k
-        return {self.name: {"cost": cost}}
+        # we willl always asusume our proposal is the best
+        return {self.name: {"cost": 10}}
 
-a = Agent(agent_name)
-a.spin()
+    def concession(round, final_proposals):
+        # always accept all proposals
+        return True
+
+agent = Agent(agent_name)
+agent.spin()
+
+# ....
+# Agent b can send in an alert with fn call
+agent_b.send_alert("task2", {})
 ```

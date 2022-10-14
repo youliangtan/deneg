@@ -37,7 +37,7 @@ class DeNeg(Node, ABC):
         Init Decentralized Negotiation library
         @name:           need to be unique
         """
-        print(f"create deneg participate : {name}")
+        print(f"create deneg participant : {name}")
         self.__internal_init(name)
 
 
@@ -146,6 +146,8 @@ class DeNeg(Node, ABC):
             self.participant_proposals[self.name] = {}
 
     def __spin(self):
+        while rclpy.ok():
+            rclpy.spin_once(self, timeout_sec=0.1)
         pass
 
     def __exit(self, id):
