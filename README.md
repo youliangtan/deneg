@@ -17,6 +17,13 @@ colcon build
 
 ## Example
 
+```bash
+source install.setup
+python3 deneg/deneg_core/scripts/agent.py
+```
+
+## Code snippit
+
 Simple example of using DeNeg for task allocation 
 
 ```py
@@ -36,7 +43,7 @@ class Agent(DeNeg):
 
     def round_table(round, other_proposals):
         # we willl always asusume our proposal is the best
-        return {self.name: {"cost": 10}}
+        return [self.name]
 
     def concession(round, final_proposals):
         # always accept all proposals

@@ -1,6 +1,6 @@
 Alert alert
 
-string proposal_id
+string room_id # room id
 
 # agent who propose
 string proponent
