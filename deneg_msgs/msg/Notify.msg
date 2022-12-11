@@ -14,3 +14,5 @@ string room_id              # The room id
 string source               # The name of the participant who sent the message
 
 uint8 data                  # Generic data, depends of the type
+
+string[] ranking            # The ranking of the participants when type is RANK

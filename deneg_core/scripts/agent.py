@@ -26,7 +26,9 @@ class Agent(DeNeg):
     #     return []
 
     def assignment(self, assignment):
-        print(f"   received assignment {assignment}")
+        print(f" \n ======================================= \n \
+            [{self.name}] received assignment [{assignment}] \
+            \n ======================================= \n")
         return True
 
 def main(agent_name):
@@ -36,7 +38,7 @@ def main(agent_name):
     a3 = Agent("agent3")
     a1.send_alert("task1", {})
 
-    time.sleep(4.5)
+    time.sleep(9)
 
     a1.shutdown()
     a2.shutdown()

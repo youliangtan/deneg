@@ -90,3 +90,5 @@ class Participant(BaseModel):
     name: str = ""
     proposal: Dict = {}
     assignment: Optional[Dict]= None
+    ranking: List[str] = []
+    data: int = 0

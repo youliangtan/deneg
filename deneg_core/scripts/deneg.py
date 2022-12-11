@@ -15,6 +15,7 @@ from utils import random_color, bcolors
 from utils import State, Participant
 
 internel_spin_mutex = Lock()
+STATE_DELAY = 0.8
 
 #############################################################
 # Not in used
@@ -250,6 +251,11 @@ class DeNeg(Node, ABC):
             self.logger(f"{msg.source} is ready {len(self.nego_parcipants)} = {msg.data}")
             # if inconsistent, throw error and exit
 
+        elif msg.type == Notify.CONSENT:
+            self.nego_parcipants[msg.source].state = Notify.CONSENT
+            self.nego_parcipants[msg.source].data = msg.data
+            self.logger(f"{msg.source} is consented {len(self.nego_parcipants)}")
+
         # Nego state
         elif msg.type == Notify.NEGO:
             # TODO: this will get called N-1 times, fix this
@@ -268,8 +274,8 @@ class DeNeg(Node, ABC):
         # Rank state
         elif msg.type == Notify.RANK:
             self.nego_parcipants[msg.source].state = Notify.RANK
-            self.logger(f"receive rank {msg.data}")
-            self.receive_rank(msg.data)
+            self.nego_parcipants[msg.source].ranking = msg.ranking
+            self.logger(f"ranking from {msg.source}: {msg.ranking}")
 
         # leave state
         elif msg.type == Notify.LEAVE:
@@ -296,15 +302,25 @@ class DeNeg(Node, ABC):
                 return False
         return True
 
-    def update_state(self, state, data=0):
+    def check_participants_data(self, target_data=1):
+        """check if all participants are consented"""
+        for pcpt in self.nego_parcipants.values():
+            if pcpt.data != target_data:
+                return False
+        return True
+
+    def update_state(self, state, data=0, ranking=[]):
         """update the state of the agent and notify others about the state update too"""
         self.nego_parcipants[self.name].state = state
+        self.nego_parcipants[self.name].data = data
+        self.nego_parcipants[self.name].ranking = ranking
         self.__notify_pub_.publish(
             Notify(
                 source=self.name,
                 type=state,
                 room_id=self.nego_queue[0],
                 data=data,
+                ranking=ranking,
             )
         )
 
@@ -323,19 +339,19 @@ class DeNeg(Node, ABC):
     def __deneg_process_thread(self, id):
         # Start the Nego process
         self.logger(f"start nego process {id}")
-        time.sleep(2)
+        time.sleep(STATE_DELAY)
 
         # Form the Room
         self.logger(f"Forming Room {id}: {self.nego_parcipants.keys()}")
         self.update_state(Notify.READY, len(self.nego_parcipants))
-        time.sleep(1)
+        time.sleep(STATE_DELAY)
 
         # check if all agents are ready
         assert self.check_participants_state(Notify.READY), \
-            f"Error: not all agents are ready, {self.nego_parcipants}"
+            f"Error: not all agents are READY, {self.nego_parcipants}"
 
         # sync all agents
-        time.sleep(0.5)
+        time.sleep(STATE_DELAY)
 
         # start negotiation rounds
         self.logger(f"Start negotiation rounds {id}")
@@ -343,30 +359,73 @@ class DeNeg(Node, ABC):
             self.logger(f"Round {i}")
             # seek for proposals
             self.update_state(Notify.NEGO, data=i)
-            time.sleep(0.8)
+            time.sleep(STATE_DELAY)
             
-            assert self.check_participants_state(Notify.NEGO)
+            assert self.check_participants_state(Notify.NEGO), \
+                f"Error: not all agents are NEGO, {self.nego_parcipants}"
+
+            time.sleep(STATE_DELAY)
 
             # round table session
             # this extract all proposals from the nego_parcipants
+
             proposals_dict = {
                 name: participant.proposal
                 for name, participant in self.nego_parcipants.items()
             }
             print(proposals_dict)
-            result = self.round_table(i, proposals_dict)
+            rank = self.round_table(i, proposals_dict)
+            self.update_state(Notify.RANK, data=i, ranking=rank)
+            time.sleep(STATE_DELAY)
+
+            assert self.check_participants_state(Notify.RANK), \
+                f"Error: not all agents are RANK, {self.nego_parcipants}"
+            time.sleep(STATE_DELAY)
 
             # consensus
             # get ranking of all round table results
+            rank = self.rank_based_vote()
 
             # check if consensus is reached
-            consent = self.concession(result)
+            time.sleep(STATE_DELAY)
+            consent = self.concession(rank)
+            self.update_state(Notify.CONSENT, data=(1 if consent else 0))
+            time.sleep(STATE_DELAY)
 
-            # send assignment according to the result
-            if consent:
-                self.assignment("DONE") # placeholder
+            assert self.check_participants_state(Notify.CONSENT), \
+                f"Error: not all agents are CONSENT, {self.nego_parcipants}"
 
+
+            print("DEBUG", self.nego_parcipants)
+            if self.check_participants_data(target_data=1):
+                self.logger(f"Consensus reached {id}")
+
+                # TODO: if only one winner is allowed
+                winner = rank[0]
+                if winner == self.name:
+                    self.assignment(self.nego_queue[0]) # placeholder
+                break
+            else:
+                self.logger(f"ERROR! Consensus not reached {id}")
+
+        self.nego_queue.pop(0)
         # TODO
+
+    def rank_based_vote(self):
+        """Ranking policy for the round table session"""
+        scores = {
+            name: 0.0
+            for name, _ in self.nego_parcipants.items()
+        }
+        # Apply weighted vote ranking from each participant
+        for name, participant in self.nego_parcipants.items():
+            for score, name in enumerate(reversed(participant.ranking)):
+                scores[name] += score
+
+        self.logger(f"ranking scores: {scores}")
+        s_ranks = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        self.logger(f"ranking: {s_ranks}")
+        return [name for name, _ in s_ranks]
 
     def state_transition(self, state):
         self.pcpt_states[self.name] = state
