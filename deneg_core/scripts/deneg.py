@@ -261,7 +261,14 @@ class DeNeg(Node, ABC):
             # TODO: this will get called N-1 times, fix this
             self.nego_parcipants[msg.source].state = Notify.NEGO
             self.logger(f"provide proposal for nego {msg.data}")
-            proposal = self.proposal_submission(msg.data)
+            
+            # this ensures that the proposal is not called multiple times and overwritten
+            if self.nego_parcipants[self.name].self_proposal:
+                proposal = self.nego_parcipants[self.name].self_proposal
+            else:
+                proposal = self.proposal_submission(msg.data)
+                self.nego_parcipants[self.name].self_proposal = proposal
+
             self.__proposal_pub_.publish(
                 Proposal(
                     proponent=self.name,

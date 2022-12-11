@@ -16,7 +16,11 @@ class Agent(DeNeg):
         return True
 
     def proposal_submission(self, round):
-        return {"cost": random.uniform(1.0, 10.0) }
+        cost = random.uniform(1.0, 10.0)
+        print(f" \n ======================================= \n \
+            [{self.name}] propose cost: [{cost}] \
+            \n ======================================= \n")
+        return {"cost": cost }
 
     def concession(self, results):
         print(f"   received results {results}")
@@ -38,7 +42,8 @@ def main(agent_name):
     a3 = Agent("agent3")
     a1.send_alert("task1", {})
 
-    time.sleep(9)
+    # a1.spin()
+    time.sleep(10)
 
     a1.shutdown()
     a2.shutdown()
@@ -52,5 +57,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("-a", "--agent", type=str, default='agt',
                         help="agent name")
+    parser.add_argument("-c", "--cost", type=float, default=0.0,
+                        help="predetermined cost")
     args = parser.parse_args()
     main(args.agent)

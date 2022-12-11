@@ -89,6 +89,7 @@ class Participant(BaseModel):
     state: int = Notify.JOIN
     name: str = ""
     proposal: Dict = {}
+    self_proposal: Optional[Dict] = None
     assignment: Optional[Dict]= None
     ranking: List[str] = []
     data: int = 0
