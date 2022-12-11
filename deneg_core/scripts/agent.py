@@ -25,6 +25,10 @@ class Agent(DeNeg):
     # def round_table(self, round: int, other_proposals):
     #     return []
 
+    def assignment(self, assignment):
+        print(f"   received assignment {assignment}")
+        return True
+
 def main(agent_name):
 
     a1 = Agent("agent1")

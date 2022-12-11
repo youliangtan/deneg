@@ -1,8 +1,8 @@
-# DeNeg
+# DeNeg Library
 
-toy problem of decentralized negotiation system
+Library for decentralized negotiation system
 
-**~WORK IN PROGRESS~**
+**WORK IN PROGRESS**
 
 DeNeg is a python library for user to implement decentralized negotiation system on each agent. This library should be implemented on each agent in the system.
 
@@ -18,11 +18,11 @@ colcon build
 ## Example
 
 ```bash
-source install.setup
+source install/setup.bash
 python3 deneg/deneg_core/scripts/agent.py
 ```
 
-## Code snippit
+## Code Snippet
 
 Simple example of using DeNeg for task allocation 
 

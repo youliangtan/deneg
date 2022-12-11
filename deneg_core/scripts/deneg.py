@@ -5,16 +5,16 @@ from rclpy.node import Node
 from std_msgs.msg import String
 from deneg_msgs.msg import Alert, Proposal, Notify
 
-import threading
+from threading import Thread, Lock
 import time
 import json
 
 from typing import Dict, List
 from abc import ABC, abstractmethod
 from utils import random_color, bcolors
+from utils import State, Participant
 
-
-internel_spin_mutex = True
+internel_spin_mutex = Lock()
 
 #############################################################
 # Not in used
@@ -27,11 +27,14 @@ class Participation:
 #############################################################
 class Evaluator:
     def LowestCostEvaluater(proposals):
-        print(proposals)
         name_list = []
         cost_list = []
         for name, content in proposals.items():
             name_list.append(name)
+            if 'cost' not in content:
+                print(f"Warning! [{name}] no cost attr")
+                return []
+
             cost_list.append(content['cost'])
         # similar to numpy.argsort
         sorted_cost_idx = \
@@ -57,7 +60,7 @@ class DeNeg(Node, ABC):
         self.__internal_init(name)
 
     @abstractmethod
-    def receive_alert(self, id, content) -> bool:
+    def receive_alert(self, id: str, content) -> bool:
         """
         This callback function will be called, to alert agent to
         whether join the negotion room, by return a Bool
@@ -104,13 +107,17 @@ class DeNeg(Node, ABC):
         return False
 
     def send_alert(
-            self, id, content: Dict, self_join = True
+            self, id: str, content: Dict, self_join = True
         ):
         """
         Agent can use this fn method to send an alert to other
         agents, which will initiate a nego process
         """
         self.__send_alert(id, content, self_join)
+
+    @abstractmethod
+    def assignment(self, assignment: Dict):
+        pass
 
     def leave(self, id):
         """
@@ -131,12 +138,6 @@ class DeNeg(Node, ABC):
         self.logger("shutdown deneg")
         if rclpy.ok():
             rclpy.shutdown()
-    
-    def error_callback(self, e):
-        self.logger("error_callback: " + str(e))
-
-    # def __del__(self):
-    #     self.logger("del deneg")
 
     #############################################################
 
@@ -161,11 +162,17 @@ class DeNeg(Node, ABC):
         self.proposal_sub_ = self.create_subscription(
             Proposal, 'nego/propose', self.__proposal_callback, 10)
 
-        self.request_queue = []
-        self.room_proposals = {}
+        # Thread handler
+        self.end_spin_thread = False
+
+        self.nego_queue = []
+
+        # Tracking 
+        self.nego_parcipants = {}
+        self.pcpt_states = {}
 
         self.ros_spin_th = \
-            threading.Thread(target=self.__rosspin_thread, args=())
+            Thread(target=self.__rosspin_thread, args=())
         self.ros_spin_th.start()
 
 
@@ -183,12 +190,19 @@ class DeNeg(Node, ABC):
             self.start_nego_process(id, self.name)
 
     def __proposal_callback(self, msg):
-        self.room_proposals[msg.proponent] = {"cost": msg.cost}
+        if msg.proponent not in self.nego_parcipants:
+            print(f"ERROR! {msg.proponent} doesnt exist during proposal callback")
+            # TODO: throw error
+        self.nego_parcipants[msg.proponent].proposal = {"cost": msg.cost}
 
     def __spin(self):
+        global internel_spin_mutex
+        self.end_spin_thread = True
         while rclpy.ok():
-            rclpy.spin_once(self, timeout_sec=0.1)
-        pass
+            if not internel_spin_mutex.locked():
+                internel_spin_mutex.acquire()
+                rclpy.spin_once(self, timeout_sec=0.1)
+                internel_spin_mutex.release()
 
     def __leave(self, id):
         pass
@@ -223,15 +237,23 @@ class DeNeg(Node, ABC):
 
         # TODO check room id
         if msg.type == Notify.JOIN:
-            self.room_proposals[msg.source] = {}
+            self.nego_parcipants[msg.source] = Participant(name=msg.source)
             self.logger(
-                f"{msg.source} joined the room of {self.room_proposals.keys()}")
+                f"{msg.source} joined the room of {self.nego_parcipants.keys()}")
+
+        # Ready state
         elif msg.type == Notify.READY:
-            self.logger(f"{msg.source} is ready {len(self.room_proposals)} = {msg.data}")
+            if msg.source not in self.nego_parcipants:
+                self.logger(f"{msg.source} is not in the room")
+                self.logger(f"ERROR! {msg.proponent} doesnt exist in ready state")
+            self.nego_parcipants[msg.source].state = Notify.READY
+            self.logger(f"{msg.source} is ready {len(self.nego_parcipants)} = {msg.data}")
             # if inconsistent, throw error and exit
 
-        elif msg.type == Notify.NEGO_ROUND:
+        # Nego state
+        elif msg.type == Notify.NEGO:
             # TODO: this will get called N-1 times, fix this
+            self.nego_parcipants[msg.source].state = Notify.NEGO
             self.logger(f"provide proposal for nego {msg.data}")
             proposal = self.proposal_submission(msg.data)
             self.__proposal_pub_.publish(
@@ -243,26 +265,60 @@ class DeNeg(Node, ABC):
                 )
             )
 
+        # Rank state
+        elif msg.type == Notify.RANK:
+            self.nego_parcipants[msg.source].state = Notify.RANK
+            self.logger(f"receive rank {msg.data}")
+            self.receive_rank(msg.data)
+
+        # leave state
+        elif msg.type == Notify.LEAVE:
+            self.logger(f"{msg.source} left the room")
+            self.nego_parcipants.pop(msg.source)
+            self.pcpt_states.pop(msg.source)
+
 
     def __rosspin_thread(self):
         global internel_spin_mutex
         while rclpy.ok():
-            if internel_spin_mutex:
-                internel_spin_mutex = False
-                # print(f"[{self.name}] spin")
+            if self.end_spin_thread:
+                break
+            if not internel_spin_mutex.locked():
+                internel_spin_mutex.acquire()
                 rclpy.spin_once(self, timeout_sec=0.1)
-                internel_spin_mutex = True
+                internel_spin_mutex.release()
+
+
+    def check_participants_state(self, target_state):
+        """check if all participants are in the target state"""
+        for pcpt in self.nego_parcipants.values():
+            if pcpt.state != target_state:
+                return False
+        return True
+
+    def update_state(self, state, data=0):
+        """update the state of the agent and notify others about the state update too"""
+        self.nego_parcipants[self.name].state = state
+        self.__notify_pub_.publish(
+            Notify(
+                source=self.name,
+                type=state,
+                room_id=self.nego_queue[0],
+                data=data,
+            )
+        )
 
     # this will call when we would like to start a nego process
     def start_nego_process(self, id, name):
         # TODO: use a state check to ensure states are correct 
         # among all participants
-
-        self.room_proposals = {self.name: {}}
-        self.room_proposals[name] = {}
+        self.nego_queue.append(id) # TODO: expandable queue
+        self.nego_parcipants = {self.name: Participant(name=self.name)}
+        self.nego_parcipants[name] = Participant(name=name)
         self.deneg_process_th = \
-            threading.Thread(target=self.__deneg_process_thread, args=(id,))
+            Thread(target=self.__deneg_process_thread, args=(id,))
         self.deneg_process_th.start()
+
 
     def __deneg_process_thread(self, id):
         # Start the Nego process
@@ -270,48 +326,51 @@ class DeNeg(Node, ABC):
         time.sleep(2)
 
         # Form the Room
-        self.logger(f"Forming Room {id}: {self.room_proposals.keys()}")
-        self.__notify_pub_.publish(
-            Notify(
-                source=self.name,
-                type=Notify.READY,
-                room_id=id,
-                data=len(self.room_proposals),
-            )
-        )
+        self.logger(f"Forming Room {id}: {self.nego_parcipants.keys()}")
+        self.update_state(Notify.READY, len(self.nego_parcipants))
         time.sleep(1)
-        
+
         # check if all agents are ready
-        
+        assert self.check_participants_state(Notify.READY), \
+            f"Error: not all agents are ready, {self.nego_parcipants}"
+
+        # sync all agents
+        time.sleep(0.5)
+
         # start negotiation rounds
         self.logger(f"Start negotiation rounds {id}")
         for i in range(1):
             self.logger(f"Round {i}")
             # seek for proposals
-            self.__notify_pub_.publish(
-                Notify(
-                    source=self.name,
-                    type=Notify.NEGO_ROUND,
-                    room_id=id,
-                    data=i,
-                )
-            )
-            time.sleep(0.5)
+            self.update_state(Notify.NEGO, data=i)
+            time.sleep(0.8)
+            
+            assert self.check_participants_state(Notify.NEGO)
 
             # round table session
-            result = self.round_table(i, self.room_proposals)
+            # this extract all proposals from the nego_parcipants
+            proposals_dict = {
+                name: participant.proposal
+                for name, participant in self.nego_parcipants.items()
+            }
+            print(proposals_dict)
+            result = self.round_table(i, proposals_dict)
 
             # consensus
-            # if consensus reached, break
+            # get ranking of all round table results
+
+            # check if consensus is reached
             consent = self.concession(result)
+
+            # send assignment according to the result
+            if consent:
+                self.assignment("DONE") # placeholder
 
         # TODO
 
+    def state_transition(self, state):
+        self.pcpt_states[self.name] = state
+        pass
+
     def logger(self, msg):
         print(f"{self.log_color}[{self.name}] {msg}{bcolors.ENDC}")
-
-def try_spin(node):
-    pass
-    # rclpy.spin_once(node, timeout_sec=0.1)
-
-    #############################################################
