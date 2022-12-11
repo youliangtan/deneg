@@ -37,17 +37,20 @@ class Agent(DeNeg):
         self.nego_content = content
         return True
 
-    def proposal_submission(round):
-        cost = cost_calcualtion(self.nego_content)
+    def proposal_submission(id, round):
+        cost = my_cost_calculation(self.nego_content)
         return {self.name: {"cost": cost}}
 
-    def round_table(round, other_proposals):
-        # we willl always asusume our proposal is the best
+    def round_table(id, round, other_proposals):
+        # Return ranking, always assume our proposal is the best
         return [self.name]
 
-    def concession(round, final_proposals):
+    def concession(id, round, final_proposals):
         # always accept all proposals
         return True
+
+    def assignment(self, id, assignment: Dict):
+        # accept then execute the assignment
 
 agent = Agent(agent_name)
 agent.spin()
