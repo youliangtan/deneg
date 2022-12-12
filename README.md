@@ -32,24 +32,23 @@ class Agent(DeNeg):
         super().__init__(name)
     
     # to whether join the room
-    def receive_alert(self, id, content):
-        print(f" {self.name} received alert with id {id}")
-        self.nego_content = content
+    def receive_alert(self, req):
+        print(f" {self.name} received alert with id {req.id}")
         return True
 
-    def proposal_submission(id, round):
-        cost = my_cost_calculation(self.nego_content)
+    def proposal_submission(req, round):
+        cost = my_cost_calculation(req.nego_content)
         return {self.name: {"cost": cost}}
 
-    def round_table(id, round, other_proposals):
+    def round_table(req, round, other_proposals):
         # Return ranking, always assume our proposal is the best
         return [self.name]
 
-    def concession(id, round, final_proposals):
+    def concession(req, round, final_proposals):
         # always accept all proposals
         return True
 
-    def assignment(self, id, assignment: Dict):
+    def assignment(self, req, proposal: Dict):
         # accept then execute the assignment
 
 agent = Agent(agent_name)
@@ -57,5 +56,12 @@ agent.spin()
 
 # ....
 # Agent b can send in an alert with fn call
-agent_b.send_alert("task2", {})
+agent_b.submit("task2", {})
 ```
+
+## Potential Improvements
+
+ - Use [fcl](https://github.com/BerkeleyAutomation/python-fcl/) For path conflict detection
+ - Fault tolerance and better state synchronization
+ - task swapping? return of evaluation heuristic for better replanning of conflict task
+ - more robust `nego_queue` task queue handling.

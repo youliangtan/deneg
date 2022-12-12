@@ -10,15 +10,16 @@ import time
 import json
 
 from typing import Dict, List, Callable
-from abc import ABC, abstractmethod
-from utils import random_color, bcolors
-from utils import State, Participant
 
+from utils import random_color, bcolors
+from utils import Participant, NegoRequest
+
+##############################################################################
 internel_spin_mutex = Lock()
 STATE_DELAY = 0.8
 MAX_NEGO_ROUNDS = 5
 
-# #############################################################
+##############################################################################
 class InternalEvaluator:
     def LowestCostEvaluater(proposals):
         name_list = []
@@ -74,13 +75,13 @@ class InternalEvaluator:
                 for i in range(len(p1)):
                     for j in range(len(p2)):
                         if p1[i] == p2[j]:
-                            print("collision detected:", p1[i], p2[j],
+                            print("collision detected:", p1[i],
                                 f"between {n} and {m}")
                             if m in non_collision_names:
                                 non_collision_names.remove(m)
         return non_collision_names
 
-#############################################################
+##############################################################################
 
 class InternalDeNeg(Node):
     def __init__(
@@ -138,27 +139,32 @@ class InternalDeNeg(Node):
         self.assignment = assignment
     
     def shutdown(self):
-        """
-        shut down the deneg
-        """
+        """User API method"""
         self.logger("shutdown deneg")
         if rclpy.ok():
             rclpy.shutdown()
 
-    #############################################################
+    def submit(self, id, content, type, self_join):
+        """User API method"""
+        # TODO: implement self_join
+        self.logger(f"A Nego Request is submitted {id}")
+        self.nego_queue.append(NegoRequest(id = id, type=type, content=content))
+        print(self.nego_queue[0])
 
-    def send_alert(self, id, content, self_join):
+        if len(self.nego_queue) == 1: # if iam the only one
+            self.send_alert(self.nego_queue[0])
+
+    def send_alert(self, task: NegoRequest):
+        """Send nego alert to all participants, this will also start the nego"""
+        self.logger(f" sending alert with {task.id}")
         msg = Alert(
                 requester=self.name,
-                alert_id=id,
-                content=json.dumps(content),
+                alert_id=task.id,
+                content=json.dumps(task.content),
+                type=task.type,
             )
-        # print(f"[{self.name}] sending alert {id}")
-        self.logger(f"Sending alert {id}")
         self.alert_pub_.publish(msg)
-        # start a nego process
-        if self_join:
-            self.start_nego_process(id, self.name)
+        self.start_nego_process(task.id, self.name, task.content)
 
     def __proposal_callback(self, msg):
         if msg.proponent not in self.nego_parcipants:
@@ -167,6 +173,7 @@ class InternalDeNeg(Node):
         self.nego_parcipants[msg.proponent].proposal = json.loads(msg.content)
 
     def spin(self):
+        """User API method"""
         global internel_spin_mutex
         self.end_spin_thread = True
         while rclpy.ok():
@@ -176,9 +183,12 @@ class InternalDeNeg(Node):
                 internel_spin_mutex.release()
 
     def leave(self, id):
+        """User API method"""
         self.logger(f"leave {id}")
         self.update_state(Notify.LEAVE, id)
-        self.nego_queue.remove(id)
+        for t in self.nego_queue:
+            if t.id == id:
+                self.nego_queue.remove(t)
 
     def __alert_callback(self, msg):
         # ignore msg sent by myself
@@ -187,15 +197,19 @@ class InternalDeNeg(Node):
 
         self.logger("callback: msg from:" \
               f"[{msg.requester}, {msg.alert_id}]" )
-        join = self.receive_alert(
-                id= msg.alert_id,
-                content=json.dumps(msg.content)
-            )
+        content = json.loads(msg.content)
+
+        req = NegoRequest(id = msg.alert_id, content = content, type=msg.type)
+        join = self.receive_alert(req)
+
         # if user choose to join the room
         if join:
             # Start a tracking deneg process
-            self.start_nego_process(msg.alert_id, msg.requester)
+            self.nego_queue.append(req)
+            self.start_nego_process(msg.alert_id, msg.requester, content)
             self.update_state(Notify.JOIN)
+        else:
+            self.logger("Choose not to join the room")
 
     def __notify_callback(self, msg):
         # ignore msg sent by myself
@@ -206,12 +220,13 @@ class InternalDeNeg(Node):
             self.logger("no nego process is running")
             return
 
-        current_id = self.nego_queue[0]
+        current_id = self.nego_queue[0].id
 
         if msg.type == Notify.JOIN:
             self.nego_parcipants[msg.source] = Participant(name=msg.source)
             self.logger(
                 f"{msg.source} joined the room of {self.nego_parcipants.keys()}")
+
         # Ready state
         elif msg.type == Notify.READY:
             if msg.source not in self.nego_parcipants:
@@ -238,7 +253,7 @@ class InternalDeNeg(Node):
             if self.nego_parcipants[self.name].self_proposal:
                 proposal = self.nego_parcipants[self.name].self_proposal
             else:
-                proposal = self.proposal_submission(current_id, msg.data)
+                proposal = self.proposal_submission(self.nego_queue[0], msg.data)
                 self.nego_parcipants[self.name].self_proposal = proposal
 
             self.__proposal_pub_.publish(
@@ -294,17 +309,15 @@ class InternalDeNeg(Node):
             Notify(
                 source=self.name,
                 type=state,
-                room_id=self.nego_queue[0],
+                room_id=self.nego_queue[0].id,
                 data=data,
                 ranking=ranking,
             )
         )
 
     # this will call when we would like to start a nego process
-    def start_nego_process(self, id, name):
-        # TODO: use a state check to ensure states are correct 
+    def start_nego_process(self, id, name, content):
         # among all participants
-        self.nego_queue.append(id) # TODO: expandable queue
         self.nego_parcipants = {self.name: Participant(name=self.name)}
         self.nego_parcipants[name] = Participant(name=name)
         self.deneg_process_th = \
@@ -315,6 +328,8 @@ class InternalDeNeg(Node):
     def __deneg_process_thread(self, id):
         # Start the Nego process
         self.logger(f"start nego process {id}")
+
+        req = self.nego_queue[0]
         time.sleep(STATE_DELAY)
 
         # Form the Room
@@ -360,7 +375,7 @@ class InternalDeNeg(Node):
                 for name, participant in self.nego_parcipants.items()
             }
 
-            rank = self.round_table(id, r, proposals_dict)
+            rank = self.round_table(req, r, proposals_dict)
             self.update_state(Notify.RANK, data=r, ranking=rank)
             time.sleep(STATE_DELAY)
 
@@ -383,8 +398,9 @@ class InternalDeNeg(Node):
 
             # check if consensus is reached
             time.sleep(STATE_DELAY)
-            consent = self.concession(id, r, rank)
+            consent = self.concession(req, r, rank)
             self.update_state(Notify.CONSENT, data=(1 if consent else 0))
+            time.sleep(STATE_DELAY)
             time.sleep(STATE_DELAY)
 
             # Assertion: check if all agents are CONSENT
@@ -402,7 +418,7 @@ class InternalDeNeg(Node):
                 # TODO: if only one winner is allowed
                 winner = rank[0]
                 if winner == self.name:
-                    self.assignment(id, self.nego_queue[0]) # placeholder
+                    self.assignment(req, {}) # TODO: placeholder, return proposal for path planning
                 break
             else:
                 self.logger(f"FAILED! Consensus not reached {id}, TRY AGAIN")
@@ -412,10 +428,18 @@ class InternalDeNeg(Node):
                 time.sleep(STATE_DELAY)
 
         self.nego_queue.pop(0)
-        self.logger(f"end nego process {id}")
+        self.logger(f"End nego process {id}\n-----------------")
+
+        # if nego_queue is not empty, start next nego process
+        if len(self.nego_queue) > 0:
+            self.send_alert(self.nego_queue[0])
 
     def rank_based_vote(self):
-        """Ranking policy for the round table session"""
+        """
+        Ranking policy for the round table session", vote score is based
+        on the ranking sequence, the higher ranked agent will get higher
+        score
+        """
         scores = {
             name: 0.0
             for name, _ in self.nego_parcipants.items()
@@ -425,7 +449,7 @@ class InternalDeNeg(Node):
             for score, name in enumerate(reversed(participant.ranking)):
                 scores[name] += score
 
-        self.logger(f"ranking scores: {scores}")
+        # sort the scores in descending order, Highest score will be first
         s_ranks = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         self.logger(f"ranking: {s_ranks}")
         return [name for name, _ in s_ranks]

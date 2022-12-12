@@ -7,12 +7,17 @@ uint8 RANK = 5              # Rank
 uint8 CONSENT = 6           # Consent
 uint8 ASSIGNMENT = 7        # Assignment
 
-uint8 type                  # The type of the message, enum above
+# The type of the message, enum above
+uint8 type
 
-string room_id              # The room id
+# The room id
+string room_id
 
-string source               # The name of the participant who sent the message
+# The name of the participant who sent the message
+string source
 
-uint8 data                  # Generic data, depends of the type
+# Generic data, depends of the type
+uint8 data
 
-string[] ranking            # The ranking of the participants when type is RANK
+# The ranking of the participants when type is RANK
+string[] ranking

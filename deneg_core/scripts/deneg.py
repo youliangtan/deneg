@@ -5,24 +5,16 @@ from abc import ABC, abstractmethod
 
 from internal_deneg import InternalDeNeg as IDeNeg 
 from internal_deneg import InternalEvaluator as IEval
+from utils import NegoRequest
+from deneg_msgs.msg import Alert
 
-#############################################################
-# Not in used
-class Participation:
-    types = ['cleaning', 'path_conflict']
-    max_wait = 1 # secs
-    max_rounds = 5
-    overall_timeout = 10 # secs
-
+##############################################################################
 class Type:
-    TaskAssignent = 0
-    PathResolution = 1
+    MISCELLANEOUS: int = Alert.MISCELLANEOUS
+    TASK_ALLOCATION: int = Alert.TASK_ALLOCATION
+    PATH_RESOLUTION: int = Alert.PATH_RESOLUTION
 
-# class NegoSpecs:
-    # type: Type
-    # rank_algo: 
-
-#############################################################
+##############################################################################
 class Evaluator:
     def LowestCostEvaluater(proposals):
         """
@@ -45,7 +37,7 @@ class Evaluator:
         """
         return IEval.PathConflictEvaluater(proposals)
 
-#############################################################
+##############################################################################
 
 class DeNeg(ABC):
     def __init__(
@@ -62,7 +54,7 @@ class DeNeg(ABC):
             )
 
     @abstractmethod
-    def receive_alert(self, id: str, content) -> bool:
+    def receive_alert(self, req: NegoRequest) -> bool:
         """
         This callback function will be called, to alert agent to
         whether join the negotion room, by return a Bool
@@ -71,7 +63,7 @@ class DeNeg(ABC):
 
     @abstractmethod
     def proposal_submission(
-            self, id: str, round: int
+            self, req: NegoRequest, round: int
         ) -> Dict:
         """
         A callback function for user to submit the proposal.
@@ -81,7 +73,7 @@ class DeNeg(ABC):
 
     @abstractmethod
     def round_table(
-            self, id: str, round: int, all_proposals: Dict[str, Dict]
+            self, req: NegoRequest, round: int, all_proposals: Dict[str, Dict]
         ) -> List:
         """
         This callback will be called in the end of each nego round.
@@ -97,28 +89,41 @@ class DeNeg(ABC):
 
     @abstractmethod
     def concession(
-            self, id: str, round: int, final_proposals: List
+            self, req: NegoRequest, round: int, final_proposals: List
         ) -> bool:
         """
         this callback function is called at the very end of the
-        negotiation process. Agent will listen to this, and suppose
-        to act according to the final proposals. User can choose
-        to return a False, in which to reject this proposal.
+        negotiation process. User can choose, to accept or reject
+        the proposal by returning a bool. If reject, this will
+        trigger another round of negotiation.
         """
         return False
 
     @abstractmethod
-    def assignment(self, id: str, assignment: Dict):
+    def assignment(self, req: NegoRequest, proposal: Dict):
+        """
+        This callback function is called when the negotiation
+        ended, and the assignment is made.
+        """
+        # TODO: what is assignment? for path conflict is proposal?
         pass
 
-    def send_alert(
-            self, id: str, content: Dict, self_join = True
+    def submit(
+            self,
+            id: str,
+            content: Dict,
+            type = Type.TASK_ALLOCATION,
+            self_join = True
         ):
         """
         Agent can use this fn method to send an alert to other
         agents, which will initiate a nego process
+        @id:            unique id for the negotiation
+        @content:       content of the negotiation
+        @type:          type of the negotiation
+        @self_join:     whether to join the negotiation
         """
-        self.deneg.send_alert(id, content, self_join)
+        self.deneg.submit(id, content, type, self_join)
 
     def leave(self, id):
         """
