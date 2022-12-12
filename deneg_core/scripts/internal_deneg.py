@@ -87,6 +87,7 @@ class InternalDeNeg(Node):
     def __init__(
             self,
             name: str,
+            debug: bool,
             receive_alert : Callable,
             proposal_submission : Callable,
             round_table : Callable,
@@ -97,8 +98,8 @@ class InternalDeNeg(Node):
         Init Decentralized Negotiation library
         @name:           need to be unique
         """
-        self.debug = True # CONFIG
-        self.unit_test = True # CONFIG
+        self.debug = debug
+        self.unit_test = False # CONFIG
 
         self.name = name
         self.log_color = random_color()
@@ -169,6 +170,7 @@ class InternalDeNeg(Node):
     def __proposal_callback(self, msg):
         if msg.proponent not in self.nego_parcipants:
             print(f"ERROR! {msg.proponent} doesnt exist during proposal callback")
+            return
             # TODO: throw error
         self.nego_parcipants[msg.proponent].proposal = json.loads(msg.content)
 
@@ -185,7 +187,7 @@ class InternalDeNeg(Node):
     def leave(self, id):
         """User API method"""
         self.logger(f"leave {id}")
-        self.update_state(Notify.LEAVE, id)
+        self.update_state(Notify.LEAVE)
         for t in self.nego_queue:
             if t.id == id:
                 self.nego_queue.remove(t)
@@ -244,15 +246,8 @@ class InternalDeNeg(Node):
         elif msg.type == Notify.NEGO:
             # TODO: this will get called N-1 times, fix this
             self.nego_parcipants[msg.source].state = Notify.NEGO
-            self.logger(f"provide proposal for nego {msg.data}")
-            
-            # this ensures that the proposal is not called multiple times 
-            # and overwritten
-            if self.nego_parcipants[self.name].self_proposal:
-                proposal = self.nego_parcipants[self.name].self_proposal
-            else:
-                proposal = self.proposal_submission(self.nego_queue[0], msg.data)
-                self.nego_parcipants[self.name].self_proposal = proposal
+            self.logger(f"provide proposal for nego {msg.data}")           
+            proposal = self.nego_parcipants[self.name].proposal
 
             self.__proposal_pub_.publish(
                 Proposal(
@@ -329,6 +324,7 @@ class InternalDeNeg(Node):
 
         req = self.nego_queue[0]
         time.sleep(STATE_DELAY)
+        time.sleep(STATE_DELAY)
 
         # Form the Room
         self.logger(f"Forming Room {id}: {self.nego_parcipants.keys()}")
@@ -350,9 +346,15 @@ class InternalDeNeg(Node):
         # start negotiation rounds
         self.logger(f"Start negotiation rounds {id}")
         for r in range(MAX_NEGO_ROUNDS):
-            self.logger(f"Round {r}")
-            # seek for proposals
+            self.logger(f" => Round {r}")
+            
+            # Start Negotiation State
+            # Get proposal from self, update nego state to seek other proposals
+            self.nego_parcipants[self.name].proposal = \
+                self.proposal_submission(self.nego_queue[0], r)
+            time.sleep(STATE_DELAY)
             self.update_state(Notify.NEGO, data=r)
+
             time.sleep(STATE_DELAY)
 
             # Assertion: check if all agents are NEGO
