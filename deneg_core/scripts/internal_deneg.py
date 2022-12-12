@@ -220,8 +220,6 @@ class InternalDeNeg(Node):
             self.logger("no nego process is running")
             return
 
-        current_id = self.nego_queue[0].id
-
         if msg.type == Notify.JOIN:
             self.nego_parcipants[msg.source] = Participant(name=msg.source)
             self.logger(
@@ -375,10 +373,11 @@ class InternalDeNeg(Node):
                 for name, participant in self.nego_parcipants.items()
             }
 
+            # for task allocation is rank, but for path resolution
+            # is conflcit free participants
             rank = self.round_table(req, r, proposals_dict)
             self.update_state(Notify.RANK, data=r, ranking=rank)
             time.sleep(STATE_DELAY)
-
 
             # Assertion: check if all agents are RANK
             if not self.check_participants_state(Notify.RANK):
@@ -393,12 +392,16 @@ class InternalDeNeg(Node):
 
             # Consensus
             # get ranking of all round table results
-            rank = self.rank_based_vote()
+            if req.type == Alert.PATH_RESOLUTION:
+                result = self.conflict_free_participants()
+            else:
+                result = self.rank_based_vote()
+
             # TODO: think of agg_ranking is published to all agents
 
             # check if consensus is reached
             time.sleep(STATE_DELAY)
-            consent = self.concession(req, r, rank)
+            consent = self.concession(req, r, result)
             self.update_state(Notify.CONSENT, data=(1 if consent else 0))
             time.sleep(STATE_DELAY)
             time.sleep(STATE_DELAY)
@@ -415,24 +418,36 @@ class InternalDeNeg(Node):
             if self.check_participants_data(target_data=1):
                 self.logger(f"Consensus reached {id}")
 
-                # TODO: if only one winner is allowed
-                winner = rank[0]
-                if winner == self.name:
-                    self.assignment(req, {}) # TODO: placeholder, return proposal for path planning
+                if req.type == Alert.PATH_RESOLUTION:
+                    self.assignment(req, proposals_dict[self.name])
+                else:
+                    # TODO: if only one winner is allowed
+                    winner = rank[0]
+                    if winner == self.name:
+                        self.assignment(req, proposals_dict[self.name]) # TODO: placeholder, return proposal for path planning
                 break
             else:
-                self.logger(f"FAILED! Consensus not reached {id}, TRY AGAIN")
+                self.logger(f"FAILED! Consensus not reached {id}, TRY AGAIN\n")
                 # remove previous self_proposal from all participants, and try again
                 for p in self.nego_parcipants.values():
                     p.self_proposal = None
                 time.sleep(STATE_DELAY)
 
         self.nego_queue.pop(0)
+        self.nego_parcipants = {}
         self.logger(f"End nego process {id}\n-----------------")
 
         # if nego_queue is not empty, start next nego process
         if len(self.nego_queue) > 0:
             self.send_alert(self.nego_queue[0])
+
+    def conflict_free_participants(self):
+        names = []
+        for _, participant in self.nego_parcipants.items():
+            for name in participant.ranking:
+                if name not in names:
+                    names.append(name)
+        return names
 
     def rank_based_vote(self):
         """
@@ -457,3 +472,6 @@ class InternalDeNeg(Node):
     def logger(self, msg):
         if self.debug:
             print(f"{self.log_color}[{self.name}] {msg}{bcolors.ENDC}")
+
+    def participants(self):
+        return self.nego_parcipants.keys()

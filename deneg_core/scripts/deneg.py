@@ -125,6 +125,12 @@ class DeNeg(ABC):
         """
         self.deneg.submit(id, content, type, self_join)
 
+    def participants(self) -> List[str]:
+        """
+        return the list of participants in the negotiation room
+        """
+        return self.deneg.participants()
+
     def leave(self, id):
         """
         To leave the negotiation room

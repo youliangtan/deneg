@@ -19,7 +19,12 @@ colcon build
 
 ```bash
 source install/setup.bash
+
+# run example with task allocation
 python3 deneg/deneg_core/scripts/agent.py
+
+# Path resolution example
+python3 deneg/deneg_core/scripts/agent.py --path
 ```
 
 ## Code Snippet

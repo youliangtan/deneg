@@ -13,7 +13,6 @@ class Agent(DeNeg):
     def __init__(self, name):
         super().__init__(name)
         self.name = name
-        self.current_nego_type = 0
     
     def receive_alert(self, req):
         print(f"   received alert with id {req.id}, with type {req.type}")
@@ -36,20 +35,28 @@ class Agent(DeNeg):
 
     def concession(self, req, round, results):
         print(f"{req.id}: received results {results}")
+
+        if len(results) != len(self.participants()):
+            print(f"{req.id}: not all participants have results")
+            return False
+
         # TODO: The line below is a test implementation for multiple rounds NEGO
         # if round == 0:
         #     return False
         return True
 
     def round_table(self, req, round: int, all_proposals):
-        if self.current_nego_type == Type.PATH_RESOLUTION:
-            return Evaluator.PathConflictEvaluater(all_proposals)
+        if req.type == Type.PATH_RESOLUTION:
+            res = Evaluator.PathConflictEvaluater(all_proposals)
+            # print(res)
+            return res
         else:
             return Evaluator.LowestCostEvaluater(all_proposals)
 
     def assignment(self, req, proposal):
         print(f"\n ======================================= \n"
               f"{req.id}: [{self.name}] received assignemnt: [{req.content}]"
+              f"\n         proposel: [{proposal}]"
               f"\n ======================================= \n")
         return True
 
@@ -60,11 +67,14 @@ def main(args):
     a3 = Agent("agent3")
     # a4 = Agent("agent4")
 
-    a1.submit("task1", {'desc': "go flush the toilet"})
-    # a1.submit("task2", {'desc': "deliver me a coke"}, Type.PATH_RESOLUTION)
+    if args.path:
+        a1.submit("task2", {'desc': "deliver me a coke"}, Type.PATH_RESOLUTION)
+        time.sleep(20)
+    else:
+        a1.submit("task1", {'desc': "go flush the toilet"}, Type.TASK_ALLOCATION)
+        time.sleep(11)
 
     # a1.spin()
-    time.sleep(15)
 
     a1.shutdown()
     a2.shutdown()
@@ -81,5 +91,7 @@ if __name__ == '__main__':
                         help="agent name")
     parser.add_argument("-c", "--cost", type=float, default=0.0,
                         help="predetermined cost")
+    parser.add_argument("--path", action="store_true",
+                        help='Run path conflict resolution example')
     args = parser.parse_args()
     main(args)
