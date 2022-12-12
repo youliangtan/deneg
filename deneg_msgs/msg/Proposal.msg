@@ -8,8 +8,14 @@ string proponent
 # negotiation round
 int8 round
 
-# overall cost
+# content of the proposal
+string content
+
+# cost of the new proposal
 float32 cost
+
+# current cost of the participant
+float32 current_cost
 
 # optional constraints info
 string constraints

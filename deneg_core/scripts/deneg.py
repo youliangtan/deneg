@@ -1,56 +1,45 @@
 #!/usr/bin/env python3
 
-import rclpy
-from rclpy.node import Node
-from std_msgs.msg import String
-from deneg_msgs.msg import Alert, Proposal, Notify
-
-from threading import Thread, Lock
-import time
-import json
-
 from typing import Dict, List
 from abc import ABC, abstractmethod
-from utils import random_color, bcolors
-from utils import State, Participant
 
-internel_spin_mutex = Lock()
-STATE_DELAY = 0.8
+from internal_deneg import InternalDeNeg as IDeNeg 
+from internal_deneg import InternalEvaluator as IEval
+from utils import NegoRequest
+from deneg_msgs.msg import Alert
 
-#############################################################
-# Not in used
-class Participation:
-    types = ['cleaning', 'path_conflict']
-    max_wait = 1 # secs
-    max_rounds = 5
-    overall_timeout = 10 # secs
+##############################################################################
+class Type:
+    MISCELLANEOUS: int = Alert.MISCELLANEOUS
+    TASK_ALLOCATION: int = Alert.TASK_ALLOCATION
+    PATH_RESOLUTION: int = Alert.PATH_RESOLUTION
 
-#############################################################
+##############################################################################
 class Evaluator:
     def LowestCostEvaluater(proposals):
-        name_list = []
-        cost_list = []
-        for name, content in proposals.items():
-            name_list.append(name)
-            if 'cost' not in content:
-                print(f"Warning! [{name}] no cost attr")
-                return []
+        """
+        Rank the cost proposals from Lowest to Highest
+        @return:    ranking list of participant names
+        """
+        return IEval.LowestCostEvaluater(proposals)
 
-            cost_list.append(content['cost'])
-        # similar to numpy.argsort
-        sorted_cost_idx = \
-            [i[0] for i in sorted(enumerate(cost_list), key=lambda x:x[1])]
-        sorted_name = [name_list[i] for i in sorted_cost_idx]
-        ranking = sorted_name
-        return ranking
+    def LowestTotalCostEvaluater(proposals):
+        """
+        Rank the total cost proposals from Lowest to Highest
+        @return:    ranking list of participant names
+        """
+        return IEval.LowestTotalCostEvaluater(proposals)
 
     def PathConflictEvaluater(proposals):
-        ranking = []
-        return ranking
+        """
+        Indentify non-conflict path proposals
+        @return:    participants that are not in conflict
+        """
+        return IEval.PathConflictEvaluater(proposals)
 
-#############################################################
+##############################################################################
 
-class DeNeg(Node, ABC):
+class DeNeg(ABC):
     def __init__(
             self, name: str
         ):
@@ -58,10 +47,14 @@ class DeNeg(Node, ABC):
         Init Decentralized Negotiation library
         @name:           need to be unique
         """
-        self.__internal_init(name)
+        self.deneg = IDeNeg(
+                name, self.receive_alert,
+                self.proposal_submission, self.round_table,
+                self.concession, self.assignment,
+            )
 
     @abstractmethod
-    def receive_alert(self, id: str, content) -> bool:
+    def receive_alert(self, req: NegoRequest) -> bool:
         """
         This callback function will be called, to alert agent to
         whether join the negotion room, by return a Bool
@@ -70,7 +63,7 @@ class DeNeg(Node, ABC):
 
     @abstractmethod
     def proposal_submission(
-            self, round: int
+            self, req: NegoRequest, round: int
         ) -> Dict:
         """
         A callback function for user to submit the proposal.
@@ -78,365 +71,74 @@ class DeNeg(Node, ABC):
         """
         return {}
 
-    # @abstractmethod
+    @abstractmethod
     def round_table(
-            self, round: int, other_proposals: List
+            self, req: NegoRequest, round: int, all_proposals: Dict[str, Dict]
         ) -> List:
         """
         This callback will be called in the end of each nego round.
         The round table is where each participant will take in
         proposals of other agents, and evaluate them.
-
-        return:
+        @all_proposals:     a dict with key as agent name, and
+                            value as the proposal
+        @return:
             provide the ranking of proposal_ids. Omit out the
             proposals that are not valid.
         """
-        # default impl
-        ranking = Evaluator.LowestCostEvaluater(other_proposals)
-        return ranking
+        return []
 
     @abstractmethod
     def concession(
-            self, final_proposals: List
+            self, req: NegoRequest, round: int, final_proposals: List
         ) -> bool:
         """
         this callback function is called at the very end of the
-        negotiation process. Agent will listen to this, and suppose
-        to act according to the final proposals. User can choose
-        to return a False, in which to reject this proposal.
+        negotiation process. User can choose, to accept or reject
+        the proposal by returning a bool. If reject, this will
+        trigger another round of negotiation.
         """
         return False
 
-    def send_alert(
-            self, id: str, content: Dict, self_join = True
+    @abstractmethod
+    def assignment(self, req: NegoRequest, proposal: Dict):
+        """
+        This callback function is called when the negotiation
+        ended, and the assignment is made.
+        """
+        # TODO: what is assignment? for path conflict is proposal?
+        pass
+
+    def submit(
+            self,
+            id: str,
+            content: Dict,
+            type = Type.TASK_ALLOCATION,
+            self_join = True
         ):
         """
         Agent can use this fn method to send an alert to other
         agents, which will initiate a nego process
+        @id:            unique id for the negotiation
+        @content:       content of the negotiation
+        @type:          type of the negotiation
+        @self_join:     whether to join the negotiation
         """
-        self.__send_alert(id, content, self_join)
-
-    @abstractmethod
-    def assignment(self, assignment: Dict):
-        pass
+        self.deneg.submit(id, content, type, self_join)
 
     def leave(self, id):
         """
         To leave the negotiation room
         """
-        self.__leave(id)
+        self.deneg.leave(id)
 
     def spin(self):
         """
         blocking function to spin the node
         """
-        self.__spin()
+        self.deneg.spin()
 
     def shutdown(self):
         """
         shut down the deneg
         """
-        self.logger("shutdown deneg")
-        if rclpy.ok():
-            rclpy.shutdown()
-
-    #############################################################
-
-    def __internal_init(self, name):
-        self.name = name
-        self.log_color = random_color()
-        self.logger("Create deneg participant")
-
-        if not rclpy.ok():
-            rclpy.init()
-        super().__init__(name)
-        self.alert_pub_ = self.create_publisher(
-            Alert, 'nego/alert', 10)
-        self.alert_sub_ = self.create_subscription(
-            Alert, 'nego/alert', self.__alert_callback, 10)
-        self.__notify_pub_ = self.create_publisher(
-            Notify, 'nego/notify', 10)
-        self.proposal_sub_ = self.create_subscription(
-            Notify, 'nego/notify', self.__notify_callback, 10)
-        self.__proposal_pub_ = self.create_publisher(
-            Proposal, 'nego/propose', 10)
-        self.proposal_sub_ = self.create_subscription(
-            Proposal, 'nego/propose', self.__proposal_callback, 10)
-
-        # Thread handler
-        self.end_spin_thread = False
-
-        self.nego_queue = []
-
-        # Tracking 
-        self.nego_parcipants = {}
-        self.pcpt_states = {}
-
-        self.ros_spin_th = \
-            Thread(target=self.__rosspin_thread, args=())
-        self.ros_spin_th.start()
-
-
-    def __send_alert(self, id, content, self_join):
-        msg = Alert(
-                requester=self.name,
-                alert_id=id,
-                content=json.dumps(content),
-            )
-        # print(f"[{self.name}] sending alert {id}")
-        self.logger(f"Sending alert {id}")
-        self.alert_pub_.publish(msg)
-        # start a nego process
-        if self_join:
-            self.start_nego_process(id, self.name)
-
-    def __proposal_callback(self, msg):
-        if msg.proponent not in self.nego_parcipants:
-            print(f"ERROR! {msg.proponent} doesnt exist during proposal callback")
-            # TODO: throw error
-        self.nego_parcipants[msg.proponent].proposal = {"cost": msg.cost}
-
-    def __spin(self):
-        global internel_spin_mutex
-        self.end_spin_thread = True
-        while rclpy.ok():
-            if not internel_spin_mutex.locked():
-                internel_spin_mutex.acquire()
-                rclpy.spin_once(self, timeout_sec=0.1)
-                internel_spin_mutex.release()
-
-    def __leave(self, id):
-        pass
-
-    def __alert_callback(self, msg):
-        # ignore msg sent by myself
-        if msg.requester == self.name:
-            return
-
-        self.logger("callback: msg from:" \
-              f"[{msg.requester}, {msg.alert_id}]" )
-        join = self.receive_alert(
-                id= msg.alert_id,
-                content=json.dumps(msg.content)
-            )
-        # if user choose to join the room
-        if join:
-            # Start a tracking deneg process
-            self.start_nego_process(msg.alert_id, msg.requester)
-            self.__notify_pub_.publish(
-                Notify(
-                    source=self.name,
-                    type=Notify.JOIN,
-                    room_id=msg.alert_id,
-                )
-            )
-
-    def __notify_callback(self, msg):
-        # ignore msg sent by myself
-        if msg.source == self.name:
-            return
-
-        # TODO check room id
-        if msg.type == Notify.JOIN:
-            self.nego_parcipants[msg.source] = Participant(name=msg.source)
-            self.logger(
-                f"{msg.source} joined the room of {self.nego_parcipants.keys()}")
-
-        # Ready state
-        elif msg.type == Notify.READY:
-            if msg.source not in self.nego_parcipants:
-                self.logger(f"{msg.source} is not in the room")
-                self.logger(f"ERROR! {msg.proponent} doesnt exist in ready state")
-            self.nego_parcipants[msg.source].state = Notify.READY
-            self.logger(f"{msg.source} is ready {len(self.nego_parcipants)} = {msg.data}")
-            # if inconsistent, throw error and exit
-
-        elif msg.type == Notify.CONSENT:
-            self.nego_parcipants[msg.source].state = Notify.CONSENT
-            self.nego_parcipants[msg.source].data = msg.data
-            self.logger(f"{msg.source} is consented {len(self.nego_parcipants)}")
-
-        # Nego state
-        elif msg.type == Notify.NEGO:
-            # TODO: this will get called N-1 times, fix this
-            self.nego_parcipants[msg.source].state = Notify.NEGO
-            self.logger(f"provide proposal for nego {msg.data}")
-            
-            # this ensures that the proposal is not called multiple times and overwritten
-            if self.nego_parcipants[self.name].self_proposal:
-                proposal = self.nego_parcipants[self.name].self_proposal
-            else:
-                proposal = self.proposal_submission(msg.data)
-                self.nego_parcipants[self.name].self_proposal = proposal
-
-            self.__proposal_pub_.publish(
-                Proposal(
-                    proponent=self.name,
-                    room_id=msg.room_id,
-                    cost = proposal["cost"],
-                    # content=json.dumps(proposal),
-                )
-            )
-
-        # Rank state
-        elif msg.type == Notify.RANK:
-            self.nego_parcipants[msg.source].state = Notify.RANK
-            self.nego_parcipants[msg.source].ranking = msg.ranking
-            self.logger(f"ranking from {msg.source}: {msg.ranking}")
-
-        # leave state
-        elif msg.type == Notify.LEAVE:
-            self.logger(f"{msg.source} left the room")
-            self.nego_parcipants.pop(msg.source)
-            self.pcpt_states.pop(msg.source)
-
-
-    def __rosspin_thread(self):
-        global internel_spin_mutex
-        while rclpy.ok():
-            if self.end_spin_thread:
-                break
-            if not internel_spin_mutex.locked():
-                internel_spin_mutex.acquire()
-                rclpy.spin_once(self, timeout_sec=0.1)
-                internel_spin_mutex.release()
-
-
-    def check_participants_state(self, target_state):
-        """check if all participants are in the target state"""
-        for pcpt in self.nego_parcipants.values():
-            if pcpt.state != target_state:
-                return False
-        return True
-
-    def check_participants_data(self, target_data=1):
-        """check if all participants are consented"""
-        for pcpt in self.nego_parcipants.values():
-            if pcpt.data != target_data:
-                return False
-        return True
-
-    def update_state(self, state, data=0, ranking=[]):
-        """update the state of the agent and notify others about the state update too"""
-        self.nego_parcipants[self.name].state = state
-        self.nego_parcipants[self.name].data = data
-        self.nego_parcipants[self.name].ranking = ranking
-        self.__notify_pub_.publish(
-            Notify(
-                source=self.name,
-                type=state,
-                room_id=self.nego_queue[0],
-                data=data,
-                ranking=ranking,
-            )
-        )
-
-    # this will call when we would like to start a nego process
-    def start_nego_process(self, id, name):
-        # TODO: use a state check to ensure states are correct 
-        # among all participants
-        self.nego_queue.append(id) # TODO: expandable queue
-        self.nego_parcipants = {self.name: Participant(name=self.name)}
-        self.nego_parcipants[name] = Participant(name=name)
-        self.deneg_process_th = \
-            Thread(target=self.__deneg_process_thread, args=(id,))
-        self.deneg_process_th.start()
-
-
-    def __deneg_process_thread(self, id):
-        # Start the Nego process
-        self.logger(f"start nego process {id}")
-        time.sleep(STATE_DELAY)
-
-        # Form the Room
-        self.logger(f"Forming Room {id}: {self.nego_parcipants.keys()}")
-        self.update_state(Notify.READY, len(self.nego_parcipants))
-        time.sleep(STATE_DELAY)
-
-        # check if all agents are ready
-        assert self.check_participants_state(Notify.READY), \
-            f"Error: not all agents are READY, {self.nego_parcipants}"
-
-        # sync all agents
-        time.sleep(STATE_DELAY)
-
-        # start negotiation rounds
-        self.logger(f"Start negotiation rounds {id}")
-        for i in range(1):
-            self.logger(f"Round {i}")
-            # seek for proposals
-            self.update_state(Notify.NEGO, data=i)
-            time.sleep(STATE_DELAY)
-            
-            assert self.check_participants_state(Notify.NEGO), \
-                f"Error: not all agents are NEGO, {self.nego_parcipants}"
-
-            time.sleep(STATE_DELAY)
-
-            # round table session
-            # this extract all proposals from the nego_parcipants
-
-            proposals_dict = {
-                name: participant.proposal
-                for name, participant in self.nego_parcipants.items()
-            }
-            print(proposals_dict)
-            rank = self.round_table(i, proposals_dict)
-            self.update_state(Notify.RANK, data=i, ranking=rank)
-            time.sleep(STATE_DELAY)
-
-            assert self.check_participants_state(Notify.RANK), \
-                f"Error: not all agents are RANK, {self.nego_parcipants}"
-            time.sleep(STATE_DELAY)
-
-            # consensus
-            # get ranking of all round table results
-            rank = self.rank_based_vote()
-
-            # check if consensus is reached
-            time.sleep(STATE_DELAY)
-            consent = self.concession(rank)
-            self.update_state(Notify.CONSENT, data=(1 if consent else 0))
-            time.sleep(STATE_DELAY)
-
-            assert self.check_participants_state(Notify.CONSENT), \
-                f"Error: not all agents are CONSENT, {self.nego_parcipants}"
-
-
-            print("DEBUG", self.nego_parcipants)
-            if self.check_participants_data(target_data=1):
-                self.logger(f"Consensus reached {id}")
-
-                # TODO: if only one winner is allowed
-                winner = rank[0]
-                if winner == self.name:
-                    self.assignment(self.nego_queue[0]) # placeholder
-                break
-            else:
-                self.logger(f"ERROR! Consensus not reached {id}")
-
-        self.nego_queue.pop(0)
-        # TODO
-
-    def rank_based_vote(self):
-        """Ranking policy for the round table session"""
-        scores = {
-            name: 0.0
-            for name, _ in self.nego_parcipants.items()
-        }
-        # Apply weighted vote ranking from each participant
-        for name, participant in self.nego_parcipants.items():
-            for score, name in enumerate(reversed(participant.ranking)):
-                scores[name] += score
-
-        self.logger(f"ranking scores: {scores}")
-        s_ranks = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        self.logger(f"ranking: {s_ranks}")
-        return [name for name, _ in s_ranks]
-
-    def state_transition(self, state):
-        self.pcpt_states[self.name] = state
-        pass
-
-    def logger(self, msg):
-        print(f"{self.log_color}[{self.name}] {msg}{bcolors.ENDC}")
+        self.deneg.shutdown()

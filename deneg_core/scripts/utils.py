@@ -3,7 +3,23 @@ from deneg_msgs.msg import Notify
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 
-#############################################################
+##############################################################################
+
+class Participant(BaseModel):
+    state: int = Notify.JOIN
+    name: str = ""
+    proposal: Dict = {}
+    self_proposal: Optional[Dict] = None
+    assignment: Optional[Dict]= None
+    ranking: List[str] = []
+    data: int = 0
+
+class NegoRequest(BaseModel):
+    id: str = ""
+    content: Dict = {}
+    type: int = 0
+
+##############################################################################
 class bcolors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -36,7 +52,7 @@ def random_color():
             [fg.red, fg.green, fg.orange, fg.blue, fg.purple, fg.cyan, fg.lightgrey, fg.darkgrey, fg.lightred, fg.lightgreen, fg.yellow, fg.lightblue, fg.pink, fg.lightcyan]
         )
 
-#############################################################
+##############################################################################
 class State:
     def __init__(self):
         self.state_seq = [
@@ -83,13 +99,3 @@ class State:
         self.bad_state = True
         self.bad_state_idx = 1
     
-#############################################################
-
-class Participant(BaseModel):
-    state: int = Notify.JOIN
-    name: str = ""
-    proposal: Dict = {}
-    self_proposal: Optional[Dict] = None
-    assignment: Optional[Dict]= None
-    ranking: List[str] = []
-    data: int = 0
