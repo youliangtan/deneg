@@ -41,14 +41,15 @@ class Evaluator:
 
 class DeNeg(ABC):
     def __init__(
-            self, name: str
+            self, name: str, debug: bool = False
         ):
         """
         Init Decentralized Negotiation library
         @name:           need to be unique
         """
         self.deneg = IDeNeg(
-                name, self.receive_alert,
+                name, debug,
+                self.receive_alert,
                 self.proposal_submission, self.round_table,
                 self.concession, self.assignment,
             )
@@ -89,13 +90,14 @@ class DeNeg(ABC):
 
     @abstractmethod
     def concession(
-            self, req: NegoRequest, round: int, final_proposals: List
+            self, req: NegoRequest, round: int, result: List
         ) -> bool:
         """
         this callback function is called at the very end of the
         negotiation process. User can choose, to accept or reject
         the proposal by returning a bool. If reject, this will
         trigger another round of negotiation.
+        @result:        names of parcipants which are valid/in rank mode
         """
         return False
 
@@ -105,7 +107,6 @@ class DeNeg(ABC):
         This callback function is called when the negotiation
         ended, and the assignment is made.
         """
-        # TODO: what is assignment? for path conflict is proposal?
         pass
 
     def submit(
@@ -124,6 +125,12 @@ class DeNeg(ABC):
         @self_join:     whether to join the negotiation
         """
         self.deneg.submit(id, content, type, self_join)
+
+    def participants(self) -> List[str]:
+        """
+        return the list of participants in the negotiation room
+        """
+        return self.deneg.participants()
 
     def leave(self, id):
         """
