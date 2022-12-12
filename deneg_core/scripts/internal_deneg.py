@@ -16,30 +16,69 @@ from utils import State, Participant
 
 internel_spin_mutex = Lock()
 STATE_DELAY = 0.8
+MAX_NEGO_ROUNDS = 5
 
 # #############################################################
 class InternalEvaluator:
     def LowestCostEvaluater(proposals):
-        
         name_list = []
         cost_list = []
         for name, content in proposals.items():
-            name_list.append(name)
             if 'cost' not in content:
                 print(f"Warning! [{name}] no cost attr")
                 return []
 
+            name_list.append(name)
             cost_list.append(content['cost'])
+
         # similar to numpy.argsort
         sorted_cost_idx = \
             [i[0] for i in sorted(enumerate(cost_list), key=lambda x:x[1])]
-        sorted_name = [name_list[i] for i in sorted_cost_idx]
-        ranking = sorted_name
-        return ranking
+        sorted_names = [name_list[i] for i in sorted_cost_idx]
+        return sorted_names
+
+    def LowestTotalCostEvaluater(proposals):
+        name_list = []
+        cost_list = []
+        for name, content in proposals.items():
+            if 'cost' not in content or 'current_cost' not in content:
+                print(f"Warning! [{name}] no cost/current_cost attr")
+                return []
+
+            name_list.append(name)
+            cost_list.append(content['cost'] + content['current_cost'])
+
+        # similar to numpy.argsort
+        sorted_cost_idx = \
+            [i[0] for i in sorted(enumerate(cost_list), key=lambda x:x[1])]
+        sorted_names = [name_list[i] for i in sorted_cost_idx]
+        return sorted_names
 
     def PathConflictEvaluater(proposals):
-        ranking = []
-        return ranking
+        # TODO: use FCL to check collision
+        name_list = proposals.keys()
+        non_collision_names = list(proposals.keys())
+        for n in name_list:
+            if 'path' not in proposals[n]:
+                print(f"Warning! [{n}] no path attr")
+                return []
+            
+        for n in name_list:
+            for m in name_list:
+                if n == m:
+                    continue
+
+                # check collision
+                p1 = proposals[n]["path"]
+                p2 = proposals[m]["path"]
+                for i in range(len(p1)):
+                    for j in range(len(p2)):
+                        if p1[i] == p2[j]:
+                            print("collision detected:", p1[i], p2[j],
+                                f"between {n} and {m}")
+                            if m in non_collision_names:
+                                non_collision_names.remove(m)
+        return non_collision_names
 
 #############################################################
 
@@ -57,6 +96,9 @@ class InternalDeNeg(Node):
         Init Decentralized Negotiation library
         @name:           need to be unique
         """
+        self.debug = True # CONFIG
+        self.unit_test = True # CONFIG
+
         self.name = name
         self.log_color = random_color()
         self.logger("Create deneg participant")
@@ -122,7 +164,7 @@ class InternalDeNeg(Node):
         if msg.proponent not in self.nego_parcipants:
             print(f"ERROR! {msg.proponent} doesnt exist during proposal callback")
             # TODO: throw error
-        self.nego_parcipants[msg.proponent].proposal = {"cost": msg.cost}
+        self.nego_parcipants[msg.proponent].proposal = json.loads(msg.content)
 
     def spin(self):
         global internel_spin_mutex
@@ -134,7 +176,9 @@ class InternalDeNeg(Node):
                 internel_spin_mutex.release()
 
     def leave(self, id):
-        pass
+        self.logger(f"leave {id}")
+        self.update_state(Notify.LEAVE, id)
+        self.nego_queue.remove(id)
 
     def __alert_callback(self, msg):
         # ignore msg sent by myself
@@ -174,7 +218,8 @@ class InternalDeNeg(Node):
                 self.logger(f"{msg.source} is not in the room")
                 self.logger(f"ERROR! {msg.proponent} doesnt exist in ready state")
             self.nego_parcipants[msg.source].state = Notify.READY
-            self.logger(f"{msg.source} is ready {len(self.nego_parcipants)} = {msg.data}")
+            self.logger(f"{msg.source} is ready")
+            assert len(self.nego_parcipants) == msg.data
             # if inconsistent, throw error and exit
 
         elif msg.type == Notify.CONSENT:
@@ -188,7 +233,8 @@ class InternalDeNeg(Node):
             self.nego_parcipants[msg.source].state = Notify.NEGO
             self.logger(f"provide proposal for nego {msg.data}")
             
-            # this ensures that the proposal is not called multiple times and overwritten
+            # this ensures that the proposal is not called multiple times 
+            # and overwritten
             if self.nego_parcipants[self.name].self_proposal:
                 proposal = self.nego_parcipants[self.name].self_proposal
             else:
@@ -199,8 +245,7 @@ class InternalDeNeg(Node):
                 Proposal(
                     proponent=self.name,
                     room_id=msg.room_id,
-                    cost = proposal["cost"],
-                    # content=json.dumps(proposal),
+                    content=json.dumps(proposal),
                 )
             )
 
@@ -278,55 +323,79 @@ class InternalDeNeg(Node):
         time.sleep(STATE_DELAY)
 
         # check if all agents are ready
-        assert self.check_participants_state(Notify.READY), \
-            f"Error: not all agents are READY, {self.nego_parcipants}"
+        if not self.check_participants_state(Notify.READY):
+            err = f"Error: not all agents are READY, {self.nego_parcipants}"
+            if self.unit_test:
+                assert False, err
+            self.logger(err)
+            self.leave(id)
+            return
 
         # sync all agents
         time.sleep(STATE_DELAY)
 
         # start negotiation rounds
         self.logger(f"Start negotiation rounds {id}")
-        for i in range(1):
-            self.logger(f"Round {i}")
+        for r in range(MAX_NEGO_ROUNDS):
+            self.logger(f"Round {r}")
             # seek for proposals
-            self.update_state(Notify.NEGO, data=i)
+            self.update_state(Notify.NEGO, data=r)
             time.sleep(STATE_DELAY)
-            
-            assert self.check_participants_state(Notify.NEGO), \
-                f"Error: not all agents are NEGO, {self.nego_parcipants}"
+
+            # Assertion: check if all agents are NEGO
+            if not self.check_participants_state(Notify.NEGO):
+                err = f"Error: not all agents are NEGO, {self.nego_parcipants}"
+                if self.unit_test:
+                    assert False, err
+                self.logger(err)
+                self.leave(id)
+                return
 
             time.sleep(STATE_DELAY)
 
             # round table session
             # this extract all proposals from the nego_parcipants
-
             proposals_dict = {
                 name: participant.proposal
                 for name, participant in self.nego_parcipants.items()
             }
-            print(proposals_dict)
-            rank = self.round_table(id, i, proposals_dict)
-            self.update_state(Notify.RANK, data=i, ranking=rank)
+
+            rank = self.round_table(id, r, proposals_dict)
+            self.update_state(Notify.RANK, data=r, ranking=rank)
             time.sleep(STATE_DELAY)
 
-            assert self.check_participants_state(Notify.RANK), \
-                f"Error: not all agents are RANK, {self.nego_parcipants}"
+
+            # Assertion: check if all agents are RANK
+            if not self.check_participants_state(Notify.RANK):
+                err = f"Error: not all agents are RANK, {self.nego_parcipants}"
+                if self.unit_test:
+                    assert False, err
+                self.logger(err)
+                self.leave(id)
+                return
+
             time.sleep(STATE_DELAY)
 
-            # consensus
+            # Consensus
             # get ranking of all round table results
             rank = self.rank_based_vote()
+            # TODO: think of agg_ranking is published to all agents
 
             # check if consensus is reached
             time.sleep(STATE_DELAY)
-            consent = self.concession(id, rank)
+            consent = self.concession(id, r, rank)
             self.update_state(Notify.CONSENT, data=(1 if consent else 0))
             time.sleep(STATE_DELAY)
 
-            assert self.check_participants_state(Notify.CONSENT), \
-                f"Error: not all agents are CONSENT, {self.nego_parcipants}"
+            # Assertion: check if all agents are CONSENT
+            if not self.check_participants_state(Notify.CONSENT):
+                err = f"Error: not all agents are CONSENT, {self.nego_parcipants}"
+                if self.unit_test:
+                    assert False, err
+                self.logger(err)
+                self.leave(id)
+                return
 
-            print("DEBUG", self.nego_parcipants)
             if self.check_participants_data(target_data=1):
                 self.logger(f"Consensus reached {id}")
 
@@ -336,7 +405,11 @@ class InternalDeNeg(Node):
                     self.assignment(id, self.nego_queue[0]) # placeholder
                 break
             else:
-                self.logger(f"ERROR! Consensus not reached {id}")
+                self.logger(f"FAILED! Consensus not reached {id}, TRY AGAIN")
+                # remove previous self_proposal from all participants, and try again
+                for p in self.nego_parcipants.values():
+                    p.self_proposal = None
+                time.sleep(STATE_DELAY)
 
         self.nego_queue.pop(0)
         self.logger(f"end nego process {id}")
@@ -358,4 +431,5 @@ class InternalDeNeg(Node):
         return [name for name, _ in s_ranks]
 
     def logger(self, msg):
-        print(f"{self.log_color}[{self.name}] {msg}{bcolors.ENDC}")
+        if self.debug:
+            print(f"{self.log_color}[{self.name}] {msg}{bcolors.ENDC}")

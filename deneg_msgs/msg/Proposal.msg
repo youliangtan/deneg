@@ -8,6 +8,9 @@ string proponent
 # negotiation round
 int8 round
 
+# content of the proposal
+string content
+
 # cost of the new proposal
 float32 cost
 
