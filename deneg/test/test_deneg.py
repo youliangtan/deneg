@@ -1,8 +1,8 @@
 from utils import State
-from deneg import DeNeg, Evaluator
+from deneg.deneg import DeNeg, Evaluator
 from deneg_msgs.msg import Notify
 
-from examples import path_conflicts_proposals
+from deneg.examples import path_conflicts_proposals
 
 proposals = {
     "agent1": {"cost": 1.0, "current_cost": 5.1},

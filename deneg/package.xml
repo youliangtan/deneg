@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>deneg</name>
+  <version>1.6.0</version>
+  <description>deneg</description>
+  <maintainer email="tan_you_liang@hotmail.com">YouLiang</maintainer>
+  <license>Apache License 2.0</license>
+
+  <build_depend>deneg_msgs</build_depend>
+
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-json</exec_depend>
+  <exec_depend>python3-requests</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
