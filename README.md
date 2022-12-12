@@ -25,16 +25,16 @@ cd ros2_ws
 colcon build
 ```
 
-## Example
+## Simple Demo
 
 ```bash
 source install/setup.bash
-cd deneg/deneg_core/scripts
+cd src/deneg/deneg/
 # run example with task allocation
-python3 agent.py --task_alloc --multi
+python3 demo.py --task_alloc --multi
 
 # Path resolution example
-python3 agent.py --path_res --multi
+python3 demo.py --path_res --multi
 ```
 
 ## Code Snippet
@@ -80,25 +80,25 @@ a.submit("req2", {'desc': "path conflict"}, Type.PATH_RESOLUTION)
 a.submit("req1", {'desc': "fetch me!"}, Type.TASK_ALLOCATION)
 ```
 
-## Multi process example
+## Multi Processes Example
 
 Run these command in three terminals (3 seperate processes) and observe!
 
 ```bash
 # terminal 1
-python3 agent.py --spin -a agent1
+python3 demo.py --spin -a agent1
 
 # terminal 2
-python3 agent.py --spin -a agent2
+python3 demo.py --spin -a agent2
 
 # terminal 3: submit task/path_conflict
-python3 agent.py --task_alloc -a agent3
+python3 demo.py --task_alloc -a agent3
 # or
-python3 agent.py --path_res -a agent3
+python3 demo.py --path_res -a agent3
 ```
 
-## Potential Improvements
-
+## Miscs Potential Improvements
+ - Run simple test: `ros2 run deneg test_agent`
  - Use [fcl](https://github.com/BerkeleyAutomation/python-fcl/) For path conflict detection
  - Fault tolerance and better state synchronization
  - task swapping? return of evaluation heuristic for better replanning of conflict task

@@ -3,9 +3,9 @@
 from typing import Dict, List
 from abc import ABC, abstractmethod
 
-from internal_deneg import InternalDeNeg as IDeNeg 
-from internal_deneg import InternalEvaluator as IEval
-from utils import NegoRequest
+from deneg.internal_deneg import InternalDeNeg as IDeNeg 
+from deneg.internal_deneg import InternalEvaluator as IEval
+from deneg.utils import NegoRequest
 from deneg_msgs.msg import Alert
 
 ##############################################################################

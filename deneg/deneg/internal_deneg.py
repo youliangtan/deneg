@@ -11,8 +11,8 @@ import json
 
 from typing import Dict, List, Callable
 
-from utils import random_color, bcolors
-from utils import Participant, NegoRequest
+from deneg.utils import random_color, bcolors
+from deneg.utils import Participant, NegoRequest
 
 ##############################################################################
 internel_spin_mutex = Lock()
