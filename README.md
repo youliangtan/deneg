@@ -97,7 +97,7 @@ python3 demo.py --task_alloc -a agent3
 python3 demo.py --path_res -a agent3
 ```
 
-## Miscs Potential Improvements
+## Miscs and Potential Improvements
  - Run simple test: `ros2 run deneg test_agent`
  - Use [fcl](https://github.com/BerkeleyAutomation/python-fcl/) For path conflict detection
  - Fault tolerance and better state synchronization

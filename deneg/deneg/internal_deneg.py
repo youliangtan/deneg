@@ -20,6 +20,7 @@ STATE_DELAY = 0.8
 MAX_NEGO_ROUNDS = 5
 
 ##############################################################################
+
 class InternalEvaluator:
     def LowestCostEvaluater(proposals):
         name_list = []
@@ -83,6 +84,29 @@ class InternalEvaluator:
 
 ##############################################################################
 
+class InternalResultsAggregator:
+    def ConflictFreeParticipant(results):
+        names = []
+        for _, participant in results.items():
+            for name in participant.ranking:
+                if name not in names:
+                    names.append(name)
+        return names
+
+    def RankBasedVoting(results):
+        scores = { name: 0.0 for name, _ in results.items() }
+        # Apply weighted vote ranking from each participant
+        for name, participant in results.items():
+            for score, name in enumerate(reversed(participant.ranking)):
+                scores[name] += score
+
+        # sort the scores in descending order, Highest score will be first
+        s_ranks = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        print(f"ranking: {s_ranks}")
+        return [name for name, _ in s_ranks]
+
+##############################################################################
+
 class InternalDeNeg(Node):
     def __init__(
             self,
@@ -93,6 +117,7 @@ class InternalDeNeg(Node):
             round_table : Callable,
             concession : Callable,
             assignment : Callable,
+            aggregate_results : Callable,
         ):
         """
         Init Decentralized Negotiation library
@@ -138,6 +163,7 @@ class InternalDeNeg(Node):
         self.round_table = round_table
         self.concession = concession
         self.assignment = assignment
+        self.aggregate_results = aggregate_results
     
     def shutdown(self):
         """User API method"""
@@ -246,7 +272,7 @@ class InternalDeNeg(Node):
         elif msg.type == Notify.NEGO:
             # TODO: this will get called N-1 times, fix this
             self.nego_parcipants[msg.source].state = Notify.NEGO
-            self.logger(f"provide proposal for nego {msg.data}")           
+            self.logger(f"provide proposal for nego {msg.data}")
             proposal = self.nego_parcipants[self.name].proposal
 
             self.__proposal_pub_.publish(
@@ -392,18 +418,12 @@ class InternalDeNeg(Node):
 
             time.sleep(STATE_DELAY)
 
-            # Consensus
-            # get ranking of all round table results
-            if req.type == Alert.PATH_RESOLUTION:
-                result = self.conflict_free_participants()
-            else:
-                result = self.rank_based_vote()
-
-            # TODO: think of agg_ranking is published to all agents
+            # The stage where we aggregate the results
+            agg_result = self.aggregate_results(self.nego_parcipants)
 
             # check if consensus is reached
             time.sleep(STATE_DELAY)
-            consent = self.concession(req, r, result)
+            consent = self.concession(req, r, agg_result)
             self.update_state(Notify.CONSENT, data=(1 if consent else 0))
             time.sleep(STATE_DELAY)
             time.sleep(STATE_DELAY)
@@ -443,37 +463,12 @@ class InternalDeNeg(Node):
         if len(self.nego_queue) > 0:
             self.send_alert(self.nego_queue[0])
 
-    def conflict_free_participants(self):
-        names = []
-        for _, participant in self.nego_parcipants.items():
-            for name in participant.ranking:
-                if name not in names:
-                    names.append(name)
-        return names
-
-    def rank_based_vote(self):
-        """
-        Ranking policy for the round table session", vote score is based
-        on the ranking sequence, the higher ranked agent will get higher
-        score
-        """
-        scores = {
-            name: 0.0
-            for name, _ in self.nego_parcipants.items()
-        }
-        # Apply weighted vote ranking from each participant
-        for name, participant in self.nego_parcipants.items():
-            for score, name in enumerate(reversed(participant.ranking)):
-                scores[name] += score
-
-        # sort the scores in descending order, Highest score will be first
-        s_ranks = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        self.logger(f"ranking: {s_ranks}")
-        return [name for name, _ in s_ranks]
-
     def logger(self, msg):
         if self.debug:
             print(f"{self.log_color}[{self.name}] {msg}{bcolors.ENDC}")
 
     def participants(self):
         return self.nego_parcipants.keys()
+
+    def current_request(self):
+        return self.nego_queue[0]

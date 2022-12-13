@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 
 from deneg.internal_deneg import InternalDeNeg as IDeNeg 
 from deneg.internal_deneg import InternalEvaluator as IEval
+from deneg.internal_deneg import InternalResultsAggregator as IResAgg
 from deneg.utils import NegoRequest
 from deneg_msgs.msg import Alert
 
@@ -38,6 +39,22 @@ class Evaluator:
         return IEval.PathConflictEvaluater(proposals)
 
 ##############################################################################
+class ResultsAggregator:
+    def ConflictFreeParticipant(results):
+        """
+        This will return the conflict free participants
+        """
+        return IResAgg.ConflictFreeParticipant(results)
+
+    def RankBasedVoting(results):
+        """
+        Ranking policy for the round table session", vote score is based
+        on the ranking sequence, the higher ranked agent will get higher
+        score
+        """
+        return IResAgg.RankBasedVoting(results)
+
+##############################################################################
 
 class DeNeg(ABC):
     def __init__(
@@ -46,12 +63,12 @@ class DeNeg(ABC):
         """
         Init Decentralized Negotiation library
         @name:           need to be unique
+        @debug:          enable debug mode
         """
         self.deneg = IDeNeg(
-                name, debug,
-                self.receive_alert,
+                name, debug, self.receive_alert,
                 self.proposal_submission, self.round_table,
-                self.concession, self.assignment,
+                self.concession, self.assignment, self.aggregate_results
             )
 
     @abstractmethod
@@ -74,8 +91,9 @@ class DeNeg(ABC):
 
     @abstractmethod
     def round_table(
-            self, req: NegoRequest, round: int, all_proposals: Dict[str, Dict]
-        ) -> List:
+            self, 
+            req: NegoRequest, round: int, all_proposals: Dict[str, Dict]
+        ) -> List[str]:
         """
         This callback will be called in the end of each nego round.
         The round table is where each participant will take in
@@ -109,6 +127,17 @@ class DeNeg(ABC):
         """
         pass
 
+    def aggregate_results(self, results: Dict) -> List[str]:
+        """
+        This callback function is called when the it is time to aggregate
+        all evaluation results from all participants. A default method
+        is provided here according to Request Type, User can override this
+        """
+        if self.current_request().type == Alert.PATH_RESOLUTION:
+            return ResultsAggregator.ConflictFreeParticipant(results)
+        else:
+            return ResultsAggregator.RankBasedVoting(results)
+
     def submit(
             self,
             id: str,
@@ -131,6 +160,12 @@ class DeNeg(ABC):
         return the list of participants in the negotiation room
         """
         return self.deneg.participants()
+
+    def current_request(self) -> NegoRequest:
+        """
+        return the current request
+        """
+        return self.deneg.current_request()
 
     def leave(self, id):
         """
